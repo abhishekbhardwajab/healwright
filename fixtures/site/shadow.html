@@ -1,0 +1,9 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Shadow</title><link rel="stylesheet" href="style.css"></head>
+<body><h1>Newsletter widget</h1><news-letter></news-letter>
+<script>
+customElements.define('news-letter', class extends HTMLElement {
+  constructor(){ super(); const r = this.attachShadow({mode:'open'});
+    r.innerHTML = '<div class="box"><input placeholder="Your email"><button>Subscribe</button><p role="status"></p></div>';
+    r.querySelector('button').onclick = () => r.querySelector('p').textContent = 'Subscribed ' + r.querySelector('input').value; }
+});
+</script></body></html>

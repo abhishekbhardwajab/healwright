@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Keys</title><link rel="stylesheet" href="style.css"></head>
+<body><h1>Keyboard and scroll</h1>
+<label for="todo">New todo</label><input id="todo"><ul id="list"></ul>
+<p id="ctx"></p><button id="ctxbtn">Options</button><button id="dbl">Double me</button><p id="dblout"></p>
+<div class="spacer"></div><button id="bottom">Bottom button</button><p id="bout"></p>
+<script>
+todo.addEventListener('keydown', e => { if (e.key === 'Enter' && todo.value) { const li = document.createElement('li'); li.textContent = todo.value; list.appendChild(li); todo.value=''; } });
+ctxbtn.addEventListener('contextmenu', e => { e.preventDefault(); ctx.textContent = 'Context menu opened'; });
+dbl.addEventListener('dblclick', () => dblout.textContent = 'Doubled');
+bottom.onclick = () => bout.textContent = 'Reached bottom';
+document.addEventListener('keydown', e => { if (e.ctrlKey && e.key === 'k') ctx.textContent = 'Shortcut used'; });
+</script></body></html>

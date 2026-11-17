@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Board</title><link rel="stylesheet" href="style.css"></head>
+<body><h1>Task board</h1>
+<section aria-label="Todo" class="zone" id="todo"><span class="chip" draggable="true" id="t1">Write tests</span></section>
+<section aria-label="Done" class="zone" id="done"></section>
+<script>
+let dragged;
+document.addEventListener('dragstart', e => { dragged = e.target; });
+for (const z of document.querySelectorAll('.zone')) {
+  z.addEventListener('dragover', e => e.preventDefault());
+  z.addEventListener('drop', e => { e.preventDefault(); z.appendChild(dragged); });
+}
+</script></body></html>

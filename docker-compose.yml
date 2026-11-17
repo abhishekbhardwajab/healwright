@@ -1,0 +1,14 @@
+services:
+  studio:
+    build: .
+    ports: ["3000:3000"]
+    environment:
+      - STUDIO_TOKEN=${STUDIO_TOKEN:-}     # set to require a bearer token on API + WebSocket
+    volumes: ["studio-data:/data"]
+    ipc: host                              # recommended for Chromium
+    init: true
+    mem_limit: 2g                          # resource limits per worker
+    cpus: 2
+    security_opt: ["no-new-privileges:true"]
+volumes:
+  studio-data:

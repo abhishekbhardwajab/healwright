@@ -1,0 +1,11 @@
+node_modules
+data/
+web/dist
+test-results/
+playwright-report/
+.tmp/
+*.tar.gz
+.env
+.env.*
+!.env.example
+*.log

@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Register</title><link rel="stylesheet" href="style.css"></head>
+<body><h1>Registration</h1>
+<form id="f">
+  <label for="name">Full name</label><input id="name" name="fullName">
+  <label for="email">Email</label><input id="email" type="email" name="email" placeholder="you@example.com">
+  <label for="country">Country</label>
+  <select id="country" name="country"><option value="">Choose…</option><option value="ca">Canada</option><option value="in">India</option><option value="us">United States</option></select>
+  <fieldset><legend>Plan</legend>
+    <label><input type="radio" name="plan" value="free" checked> Free</label>
+    <label><input type="radio" name="plan" value="pro"> Pro</label>
+  </fieldset>
+  <label><input type="checkbox" name="terms" id="terms"> I accept the terms</label>
+  <label><input type="checkbox" name="news" checked> Send me news</label>
+  <label for="bio">Bio</label><textarea id="bio" name="bio"></textarea>
+  <label for="cv">Resume</label><input id="cv" type="file" name="resume">
+  <div><button type="submit">Create account</button></div>
+</form>
+<pre id="out" data-testid="summary"></pre>
+<script>
+document.getElementById('f').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target); const o = {};
+  for (const [k, v] of fd) o[k] = v instanceof File ? v.name : v;
+  document.getElementById('out').textContent = JSON.stringify(o);
+});
+</script></body></html>

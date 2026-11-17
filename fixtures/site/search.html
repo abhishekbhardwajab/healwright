@@ -1,0 +1,27 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Search</title><link rel="stylesheet" href="style.css"></head>
+<body><h1>Product search</h1>
+<input type="search" placeholder="Search products" aria-label="Search products" id="q">
+<button id="go">Search</button>
+<p id="count" aria-live="polite"></p>
+<ul id="results"></ul>
+<p>Cart: <span data-testid="cart-count">0</span> items</p>
+<script>
+const items = ['Red shoe','Blue shoe','Green hat','Red hat','Yellow scarf'];
+function search(){
+  const q = document.getElementById('q').value.toLowerCase();
+  const ul = document.getElementById('results'); ul.innerHTML='';
+  // results render asynchronously like a real API call
+  setTimeout(() => {
+    const hits = items.filter(i => i.toLowerCase().includes(q));
+    document.getElementById('count').textContent = hits.length + ' results';
+    for (const h of hits) {
+      const li = document.createElement('li'); li.className='card';
+      li.innerHTML = '<h3>'+h+'</h3><button>Add to cart</button>';
+      li.querySelector('button').onclick = () => { const c=document.querySelector('[data-testid=cart-count]'); c.textContent = +c.textContent+1; };
+      ul.appendChild(li);
+    }
+  }, 400);
+}
+document.getElementById('go').onclick = search;
+document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+</script></body></html>

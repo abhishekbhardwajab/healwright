@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Sign in</title><link rel="stylesheet" href="style.css"></head>
+<body><h1>Sign in</h1>
+<form id="login">
+  <label for="u">Username</label><input id="u" name="username" autocomplete="username">
+  <label for="p">Password</label><input id="p" name="password" type="password">
+  <div><label><input type="checkbox" name="remember"> Remember me</label></div>
+  <button type="submit">Login</button>
+  <p class="error" id="err" role="alert"></p>
+</form>
+<script>
+document.getElementById('login').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const u = document.getElementById('u').value, p = document.getElementById('p').value;
+  if (u === 'test-user' && p === 's3cret!') { sessionStorage.setItem('user', u); setTimeout(() => location.href = 'dashboard.html', 300); }
+  else document.getElementById('err').textContent = 'Invalid username or password';
+});
+</script></body></html>

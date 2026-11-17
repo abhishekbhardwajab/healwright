@@ -1,0 +1,43 @@
+{
+  "name": "healwright",
+  "version": "1.0.0",
+  "description": "Record & Play test studio built on Playwright, with optional AI self-healing",
+  "scripts": {
+    "dev": "concurrently -k \"tsx watch src/server/index.ts\" \"vite --config web/vite.config.ts\"",
+    "build": "vite build --config web/vite.config.ts",
+    "start": "tsx src/server/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "playwright test --trace off",
+    "metrics": "tsx tests/summarize-metrics.ts"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.10.0",
+    "diff": "^9.0.0",
+    "express": "^4.22.3",
+    "playwright": "^1.63.0",
+    "ws": "^8.23.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@playwright/test": "^1.63.0",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/express": "^4.17.25",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "^6.3.0",
+    "concurrently": "^10.0.7",
+    "monaco-editor": "^0.57.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwindcss": "^4.3.5",
+    "tsx": "^4.23.15",
+    "typescript": "5.9",
+    "vite": "^8.3.8"
+  },
+  "type": "module"
+}

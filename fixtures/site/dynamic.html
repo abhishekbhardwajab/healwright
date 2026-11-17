@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Dynamic</title><link rel="stylesheet" href="style.css"></head>
+<body><h1>Dynamic DOM</h1><div id="root"></div>
+<script>
+// ?v=1 (default) original layout; ?v=2 restructured DOM (extra wrappers, reordered, new generated ids);
+// ?v=3 button text renamed (role/name selector breaks, stable attributes remain).
+const v = new URLSearchParams(location.search).get('v') || '1';
+const rid = () => 'el-' + Math.random().toString(36).slice(2, 9);
+const btnText = v === '3' ? 'Log in now' : 'Sign in';
+const btn = '<button id="submit-btn" name="submit" class="'+rid()+'">'+btnText+'</button>';
+const field = '<label for="'+(v==='2'?'em2':'em')+'">Work email</label><input id="'+(v==='2'?'em2':'em')+'" name="workEmail">';
+document.getElementById('root').innerHTML = v === '2'
+  ? '<div><div class="w"><section>'+btn+'</section></div><div>'+field+'</div></div><p id="msg"></p>'
+  : '<div>'+field+'</div><div>'+btn+'</div><p id="msg"></p>';
+document.getElementById('submit-btn').onclick = () => document.getElementById('msg').textContent = 'Hello ' + document.querySelector('[name=workEmail]').value;
+</script></body></html>

@@ -1,0 +1,25 @@
+<!doctype html><html><head><meta charset="utf-8"><title>SPA</title><link rel="stylesheet" href="style.css"></head>
+<body><nav><a href="/home" data-link>Home</a><a href="/about" data-link>About</a><a href="/contact" data-link>Contact</a></nav>
+<main id="view"></main>
+<script>
+// Minimal client-side router (pushState) that re-renders the whole view, like React/Angular apps do.
+const base = location.pathname.replace(/\/spa\.html.*$/, '/spa.html');
+const routes = {
+  home: () => '<h1>Home</h1><p>Welcome to the SPA.</p>',
+  about: () => '<h1>About us</h1><button id="b'+Math.floor(Math.random()*1e6)+'" class="css-'+Math.random().toString(36).slice(2,8)+'">Load team</button><ul id="team"></ul>',
+  contact: () => '<h1>Contact</h1><label>Message <textarea></textarea></label><button>Send message</button><p id="sent"></p>',
+};
+function render(){
+  const r = (new URLSearchParams(location.search).get('r')) || 'home';
+  document.getElementById('view').innerHTML = routes[r]();
+  const lt = document.querySelector('#view button');
+  if (r === 'about') lt.onclick = () => setTimeout(() => { document.getElementById('team').innerHTML = '<li>Ada</li><li>Linus</li>'; }, 700);
+  if (r === 'contact') lt.onclick = () => document.getElementById('sent').textContent = 'Thanks!';
+}
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-link]'); if (!a) return;
+  e.preventDefault(); history.pushState({}, '', base + '?r=' + a.getAttribute('href').slice(1)); render();
+});
+window.addEventListener('popstate', render);
+render();
+</script></body></html>
