@@ -16,18 +16,105 @@ healwright is a record-and-play test studio built on Playwright. You open the st
 - **Measured results from the last test run:** [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md)
 - **PostgreSQL schema (target design):** [docs/schema.sql](docs/schema.sql)
 
-## Quick start
+## How to run (step by step)
 
-Requires Node.js 22+.
+No programming knowledge is needed. You type a few commands into a text window called a **terminal**, and then use the studio in your normal web browser. Setup takes about 10 minutes the first time, mostly waiting for downloads.
 
-```bash
-npm install
-npx playwright install chromium   # skip if Chromium for playwright 1.63 is already installed
-npm run build                     # builds the studio UI into web/dist
-npm start                         # http://localhost:3000
+### Step 1. Install Node.js (one time)
+
+Node.js is the free program that runs healwright.
+
+1. Go to **https://nodejs.org** and click the big green button for the **LTS** version (version 22 or newer).
+2. Open the file you downloaded and click **Next / Continue** until it finishes. Keep all the default options.
+
+### Step 2. Download healwright (one time)
+
+1. Sign in to GitHub and open **https://github.com/abhishekbhardwajab/healwright**. The repository is private, so you need to have been given access.
+2. Click the green **Code** button, then **Download ZIP**.
+3. Unzip it: on Windows right-click the file and choose **Extract All**; on a Mac double-click it.
+4. Move the unzipped folder somewhere easy to find, such as your **Documents** folder. It will be called something like `healwright-main`.
+
+### Step 3. Open a terminal inside the healwright folder
+
+**Windows**
+1. Open the `healwright-main` folder in File Explorer.
+2. Click once in the address bar at the top (where the folder path is shown), type `powershell`, and press **Enter**. A blue or black window opens: that is the terminal.
+
+**Mac**
+1. Open **Terminal** (press **Cmd + Space**, type `Terminal`, press **Enter**).
+2. Type `cd ` (the letters c and d, then a space), drag the `healwright-main` folder from Finder into the Terminal window, and press **Enter**.
+
+To check you are in the right place, type `npm -v` and press **Enter**. You should see a version number such as `10.9.0`. If you see an error instead, see *Troubleshooting* below.
+
+### Step 4. Set up healwright (one time)
+
+Type this command and press **Enter**:
+
+```
+npm run setup
 ```
 
-Open http://localhost:3000. The URL box defaults to the bundled demo site (`/fixtures/login.html`, user `test-user` / password `s3cret!`); any public URL also works. Then:
+This downloads everything healwright needs, including its own copy of the Chromium browser, and prepares the app. It can take 5 to 10 minutes. It is finished when you can type in the terminal again. Some yellow `WARN` lines are normal; only a red `ERR!` means something went wrong.
+
+### Step 5. Start healwright
+
+Type this command and press **Enter**:
+
+```
+npm start
+```
+
+When you see `healwright studio on http://localhost:3000`, open your web browser (Chrome, Edge, Safari or Firefox) and go to:
+
+**http://localhost:3000**
+
+Leave the terminal window open while you use the studio. Closing it stops healwright.
+
+### Step 6 (optional). Turn on the AI features
+
+The AI self-healing and "change this test by asking" features use Claude and need an **Anthropic API key**. Everything else works without one.
+
+1. Create a key at **https://console.anthropic.com** (an Anthropic account with billing is required; each AI request is a small paid API call).
+2. Stop healwright if it is running (click the terminal and press **Ctrl + C**).
+3. In the same terminal, set the key and start again. Replace `your-key-here` with your key, keeping the quotes:
+
+   **Windows (PowerShell)**
+   ```
+   $env:ANTHROPIC_API_KEY="your-key-here"
+   npm start
+   ```
+
+   **Mac**
+   ```
+   export ANTHROPIC_API_KEY="your-key-here"
+   npm start
+   ```
+
+The **✨ AI** tab in the studio shows the model name when the key was picked up. You need to set the key again each time you open a new terminal window. Keep the key private: never share it or save it inside the project folder.
+
+### Every time after that
+
+You only repeat Steps 3 and 5: open a terminal in the healwright folder and type `npm start` (plus the Step 6 key line first if you want the AI features). Then go to http://localhost:3000.
+
+**To stop healwright:** click the terminal window and press **Ctrl + C** (on a Mac too), or just close the window.
+
+### Troubleshooting
+
+| What you see | What to do |
+|---|---|
+| `npm is not recognized` / `command not found: npm` | Node.js is not installed, or the terminal was opened before installing it. Install Node.js (Step 1), close the terminal, and open a new one. |
+| Windows: `running scripts is disabled on this system` | Type `npm.cmd run setup` and `npm.cmd start` instead, or run this once and answer **Y**: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
+| `ENOENT: no such file or directory, open ... package.json` | The terminal is not inside the healwright folder. Redo Step 3. |
+| `EADDRINUSE` or "port 3000 is already in use" | healwright (or another program) is already running. Close other terminal windows running it, or start on another port: Windows `$env:PORT="3001"; npm start`, Mac `PORT=3001 npm start`, then open http://localhost:3001 |
+| The browser says "This site can't be reached" | healwright is not running. Check the terminal shows `healwright studio on http://localhost:3000` and has not been closed. |
+| The page opens but is blank | The setup did not finish. Run `npm run setup` again and watch for red `ERR!` lines. |
+| `Executable doesn't exist` or a message about installing browsers | The Chromium download did not finish. Run `npx playwright install chromium`. On a company network, a firewall may block it; ask your IT team. |
+| The ✨ AI tab says AI is not configured | The API key was not set in the same terminal window before `npm start`. Redo Step 6. |
+| Anything else | Copy the red text from the terminal and send it to the project owner. |
+
+## Using the studio
+
+The URL box defaults to the bundled demo site (`/fixtures/login.html`, user `test-user` / password `s3cret!`); any public URL also works. Then:
 
 1. Press **● Record**. A Chromium session opens in the live view.
 2. Click and type in the live view. Steps appear on the right as you go.
@@ -47,8 +134,6 @@ Set `ANTHROPIC_API_KEY` before `npm start` to turn on two features. Without a ke
 
 ![Reviewing an AI locator fix](docs/screenshots/ai-heal-review.png)
 ![Prompt edit with code diff](docs/screenshots/ai-prompt-edit.png)
-
-For development with hot reload: `npm run dev` (API on :3000, UI on :5173).
 
 ### Configuration
 
@@ -71,6 +156,14 @@ docker compose up --build
 ```
 
 The image is based on `mcr.microsoft.com/playwright:v1.63.0-noble`. It has not been built in the environment where this PoC was developed. See the limitations in docs/ARCHITECTURE.md.
+
+## Developer quick start
+
+```bash
+npm run setup     # npm install + Chromium for Playwright + build the UI (web/dist)
+npm start         # http://localhost:3000
+npm run dev       # hot reload: API on :3000, UI on :5173
+```
 
 ## Tests
 

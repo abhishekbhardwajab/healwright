@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Record & Play test studio built on Playwright, with optional AI self-healing",
   "scripts": {
+    "setup": "npm install && npx playwright install chromium && npm run build",
     "dev": "concurrently -k \"tsx watch src/server/index.ts\" \"vite --config web/vite.config.ts\"",
     "build": "vite build --config web/vite.config.ts",
     "start": "tsx src/server/index.ts",
