@@ -31,6 +31,7 @@ const DEFAULTS: Required<Omit<ExecutionOptions, 'onlyStep' | 'fromStep' | 'varia
   screenshots: 'every-step',
   settle: 'domcontentloaded',
   headless: true,
+  stepDelayMs: 0,
 };
 
 class ResolveError extends Error {}
@@ -92,7 +93,9 @@ export class ReplayEngine extends EventEmitter {
       if (this.deps.livePages) {
         this.pages = new Map(this.deps.livePages);
       } else {
-        const browser = await getBrowser();
+        const headed = this.o.headless === false;
+        const browser = await getBrowser({ headed });
+        if (headed) this.log('info', 'Replaying in a live browser window');
         this.context = await browser.newContext({ viewport: this.test.viewport, acceptDownloads: true });
         this.context.setDefaultTimeout(this.o.stepTimeoutMs);
         // The recorder script is loaded only for its selector engine (used by AI healing);
@@ -113,11 +116,14 @@ export class ReplayEngine extends EventEmitter {
         if (!indices.includes(i) || actions[i].disabled) { step.status = 'skipped'; continue; }
         if (this.stopped) { step.status = 'skipped'; continue; }
         if (failed && !this.o.continueOnFailure) { step.status = 'skipped'; continue; }
+        if (this.o.stepDelayMs > 0 && i !== indices[0]) await this.pause(this.o.stepDelayMs);
         const ok = await this.runStep(actions[i], step, dir);
         if (!ok && !actions[i].optional) failed = true;
       }
       this.emitUpdate();
       ex.status = this.stopped ? 'stopped' : failed ? 'failed' : 'passed';
+      // Leave a live window up briefly so the end state can be seen.
+      if (this.o.headless === false && !this.deps.livePages && !this.stopped) await this.pause(1500);
     } catch (e) {
       ex.status = this.stopped ? 'stopped' : 'failed';
       this.log('error', `Execution error: ${(e as Error).message}`);
@@ -127,6 +133,12 @@ export class ReplayEngine extends EventEmitter {
       this.log('info', `Execution ${ex.status} in ${ex.finishedAt - ex.startedAt}ms`);
     }
     return ex;
+  }
+
+  /** Sleep that ends early when the run is stopped. */
+  private async pause(ms: number) {
+    const until = Date.now() + ms;
+    while (!this.stopped && Date.now() < until) await new Promise((r) => setTimeout(r, Math.min(50, until - Date.now())));
   }
 
   private selectIndices(): number[] {

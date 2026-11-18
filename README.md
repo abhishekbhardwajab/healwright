@@ -125,6 +125,20 @@ The URL box defaults to the bundled demo site (`/fixtures/login.html`, user `tes
 
 Hover a step to edit, delete, duplicate, reorder, disable, add an assertion on its element, replay that step, or replay from it.
 
+### Live browser window
+
+Tick **Live window** next to **● Record** to record in a real Chromium window on your computer instead of the in-studio view. Enter any website URL, press Record, and use the window like a normal browser:
+
+- Clicks, typing, dropdowns (the browser's own), checkboxes, drag and drop, keyboard shortcuts and scrolling are recorded as usual.
+- Typing a URL in the window's address bar, the Back, Forward and Reload buttons, and switching tabs are recorded too (a tab switch is recorded when you first click or type in the other tab).
+- File uploads: when the page asks for a file, the studio shows the file picker, so the same file can be reused when the test runs.
+- **✔ Add assertion** works in the window: press it in the studio, then click the element in the window.
+- The studio view mirrors the window. If you close the window, the steps are kept: press **■ Stop** to save, or enter a URL to open the window again.
+
+To watch a replay, open **Run settings** and tick **Run in a live browser window**. **Pause between steps** slows it down so you can follow along.
+
+Live mode needs a screen: it works when the studio runs on your own Mac, Windows or Linux desktop. On a Linux server without a display, start the studio with `xvfb-run npm start` (the window is then virtual). In Docker the option is greyed out.
+
 ### AI self-healing and prompt editing (Claude)
 
 Set `ANTHROPIC_API_KEY` before `npm start` to turn on two features. Without a key both are off and the rest of the studio works as before.
@@ -142,7 +156,7 @@ Set `ANTHROPIC_API_KEY` before `npm start` to turn on two features. Without a ke
 | `PORT` | 3000 | HTTP and WebSocket port |
 | `DATA_DIR` | `./data` | Tests, executions, screenshots, uploads |
 | `STUDIO_TOKEN` | unset | If set, the API and WebSocket require `Authorization: Bearer <token>` (UI: `?token=`) |
-| `HEADED` | unset | Run Chromium headed (local debugging) |
+| `HEADED` | unset | Run every session and run in a visible window (same as always ticking *Live window*) |
 | `TEST_*` | | Secret values for replay after a server restart (for example `TEST_PASSWORD`) |
 | `ANTHROPIC_API_KEY` | unset | Enables AI self-healing and prompt editing with Claude |
 | `AI_MODEL` | `claude-opus-5-5` | Claude model used for both features |
@@ -168,8 +182,9 @@ npm run dev       # hot reload: API on :3000, UI on :5173
 ## Tests
 
 ```bash
-npm test          # 38 tests: 20 recording/replay scenarios, generated specs run by Playwright Test, UI end-to-end,
+npm test          # 43 tests: 20 recording/replay scenarios, generated specs run by Playwright Test, UI end-to-end,
                   # codegen units, 11 AI healing/editing tests and an AI UI end-to-end (scripted model),
+                  # 5 live browser window tests (skipped without a display; use `xvfb-run -a npm test` on a server),
                   # plus 2 live-Claude tests that are skipped unless ANTHROPIC_API_KEY is set
 npm run metrics   # writes docs/TEST_RESULTS.md from the last run
 npm run typecheck

@@ -14,6 +14,11 @@ export function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [viewport, setViewport] = useState({ width: 1280, height: 800 });
   const [mode, setMode] = useState('off');
+  // Live browser mode: record in a real, visible browser window instead of the streamed view.
+  const [liveAvailable, setLiveAvailable] = useState(false);
+  const [liveWanted, setLiveWanted] = useState(() => localStorage.getItem('liveBrowser') === '1');
+  const [sessionLive, setSessionLive] = useState(false);
+  const [windowClosed, setWindowClosed] = useState(false);
   const [url, setUrl] = useState(`${location.origin}/fixtures/login.html`);
   const [tabs, setTabs] = useState<{ alias: string; url: string }[]>([]);
   const [activeTab, setActiveTab] = useState('page');
@@ -41,20 +46,25 @@ export function App() {
     if (m.t === 'frame' && m.sessionId === sid) frameSink.current(m.data);
     else if (m.t === 'actions' && m.sessionId === sid) setDraft((d) => ({ ...d, actions: m.actions }));
     else if (m.t === 'url' && m.sessionId === sid) setUrl(m.url);
-    else if (m.t === 'tabs' && m.sessionId === sid) { setTabs(m.tabs); setActiveTab(m.active); }
+    else if (m.t === 'tabs' && m.sessionId === sid) { setTabs(m.tabs); setActiveTab(m.active); if (m.tabs.length) setWindowClosed(false); }
     else if (m.t === 'mode' && m.sessionId === sid) setMode(m.mode);
     else if (m.t === 'pick' && m.sessionId === sid) setPick({ target: m.target, snapshot: m.snapshot, pageAlias: m.pageAlias, url: m.url });
     else if (m.t === 'selectOpen' && m.sessionId === sid) setSelectOpen(m);
     else if (m.t === 'fileChooser' && m.sessionId === sid) setChooser({ id: m.id, multiple: m.multiple });
     else if (m.t === 'log' && m.sessionId === sid) setLog((l) => [...l.slice(-200), `${m.level}: ${m.message}`]);
-    else if (m.t === 'sessionClosed' && m.sessionId === sid) { setSessionId(null); setMode('off'); }
+    else if (m.t === 'sessionClosed' && m.sessionId === sid) { setSessionId(null); setMode('off'); setSessionLive(false); }
+    else if (m.t === 'windowClosed' && m.sessionId === sid) setWindowClosed(true);
     else if (m.t === 'testUpdated') setDraft((d) => (d.id === m.test.id && !sessionRef.current ? { ...m.test } : d));
     else if (m.t === 'execution') setExecutions((e) => ({ ...e, [m.execution.id]: m.execution }));
   }), []);
   useEffect(() => () => ws.close(), [ws]);
 
   const refreshTests = useCallback(() => api.tests().then(setTests).catch((e) => setError(e.message)), []);
-  useEffect(() => { void refreshTests(); api.aiStatus().then(setAiStatus).catch(() => {}); }, [refreshTests]);
+  useEffect(() => {
+    void refreshTests();
+    api.status().then((s) => { setAiStatus(s.ai); setLiveAvailable(s.liveBrowser); }).catch(() => api.aiStatus().then(setAiStatus).catch(() => {}));
+  }, [refreshTests]);
+  useEffect(() => { localStorage.setItem('liveBrowser', liveWanted ? '1' : '0'); }, [liveWanted]);
 
   // live code generation from the action model
   useEffect(() => {
@@ -83,14 +93,14 @@ export function App() {
 
   // ----- recording controls -----
   const startRecording = guard(async () => {
-    const s = await api.startSession(url, draft.id);
-    setViewport(s.viewport); setSessionId(s.id); setMode('record'); setPanel('steps');
+    const s = await api.startSession(url, draft.id, liveWanted && liveAvailable);
+    setViewport(s.viewport); setSessionId(s.id); setSessionLive(s.live); setWindowClosed(false); setMode('record'); setPanel('steps');
   });
   const stopRecording = guard(async () => {
     if (!sessionId) return;
     const t = await api.saveSession(sessionId, draft.name, draft.id);
     await api.stopSession(sessionId);
-    setDraft({ ...t }); setSessionId(null); setMode('off'); await refreshTests();
+    setDraft({ ...t }); setSessionId(null); setSessionLive(false); setMode('off'); await refreshTests();
   });
   const setRecMode = (m: string) => guard(async () => { if (sessionId) await api.mode(sessionId, m); })();
 
@@ -190,6 +200,12 @@ export function App() {
             <form className="flex-1 flex" onSubmit={(e) => { e.preventDefault(); if (sessionId) void api.navigate(sessionId, url); else startRecording(); }}>
               <input data-testid="url" className="inp font-mono" value={url} onChange={(e) => setUrl(e.target.value)} aria-label="URL" />
             </form>
+            {!recording && (
+              <label className={`flex items-center gap-1 text-xs whitespace-nowrap px-1 ${liveAvailable ? '' : 'text-slate-400'}`}
+                title={liveAvailable ? 'Record in a real browser window on this computer. Use it like a normal browser: address bar, tabs and back/forward are recorded too.' : 'Needs a display: run the studio on your desktop, or with xvfb-run on a server.'}>
+                <input data-testid="live-toggle" type="checkbox" disabled={!liveAvailable} checked={liveWanted && liveAvailable} onChange={(e) => setLiveWanted(e.target.checked)} /> Live window
+              </label>
+            )}
             {!recording && <Btn data-testid="record" variant="danger" onClick={startRecording}>● Record</Btn>}
             {recording && mode === 'record' && <Btn onClick={() => setRecMode('paused')}>❚❚ Pause</Btn>}
             {recording && mode === 'paused' && <Btn onClick={() => setRecMode('record')}>● Resume</Btn>}
@@ -203,9 +219,9 @@ export function App() {
               ))}
             </div>
           )}
-          <BrowserView sessionId={sessionId} viewport={viewport} send={ws.send} mode={mode} registerFrameSink={useCallback((fn) => { frameSink.current = fn; }, [])} />
+          <BrowserView sessionId={sessionId} viewport={viewport} send={ws.send} mode={mode} live={sessionLive} windowClosed={windowClosed} registerFrameSink={useCallback((fn) => { frameSink.current = fn; }, [])} />
           <div className="text-[11px] text-slate-500 flex gap-3">
-            <span>Status: <b data-testid="rec-status">{recording ? (mode === 'record' ? 'Recording' : mode === 'paused' ? 'Paused' : mode === 'assert' ? 'Picking element' : mode) : 'Idle'}</b></span>
+            <span>Status: <b data-testid="rec-status">{recording ? (mode === 'record' ? 'Recording' : mode === 'paused' ? 'Paused' : mode === 'assert' ? 'Picking element' : mode) : 'Idle'}</b>{recording && sessionLive ? ' in live window' : ''}</span>
             {log.length > 0 && <span className="truncate">{log[log.length - 1]}</span>}
           </div>
         </section>
@@ -239,7 +255,7 @@ export function App() {
                   <Btn onClick={() => updateActions([...draft.actions, { id: newStepId(), type: 'navigate', url, timestamp: Date.now(), pageAlias: 'page', metadata: { url } } as Action])}>+ Navigate</Btn>
                 </div>
                 <VariablesEditor value={draft.variables} onChange={(variables) => { setDraft({ ...draft, variables }); if (draft.id) void api.updateTest(draft.id, { variables }); }} />
-                <RunOptions value={runOpts} onChange={setRunOpts} />
+                <RunOptions value={runOpts} onChange={setRunOpts} liveAvailable={liveAvailable} />
               </>
             )}
             {panel === 'code' && <CodePanel code={code} fileName={`${draft.name.replace(/\W+/g, '-').toLowerCase()}.spec.ts`} />}
@@ -333,7 +349,7 @@ function VariablesEditor({ value, onChange }: { value: Record<string, string>; o
   );
 }
 
-function RunOptions({ value, onChange }: { value: ExecutionOptions; onChange: (v: ExecutionOptions) => void }) {
+function RunOptions({ value, onChange, liveAvailable }: { value: ExecutionOptions; onChange: (v: ExecutionOptions) => void; liveAvailable: boolean }) {
   return (
     <details className="px-3 py-2 border-t border-slate-100">
       <summary className="text-xs text-slate-600 cursor-pointer">Run settings</summary>
@@ -343,6 +359,10 @@ function RunOptions({ value, onChange }: { value: ExecutionOptions; onChange: (v
         <Field label="Screenshots"><select className="inp" value={value.screenshots} onChange={(e) => onChange({ ...value, screenshots: e.target.value as ExecutionOptions['screenshots'] })}><option>every-step</option><option>on-failure</option><option>off</option></select></Field>
         <Field label="Sync after navigation"><select className="inp" value={value.settle ?? 'domcontentloaded'} onChange={(e) => onChange({ ...value, settle: e.target.value as ExecutionOptions['settle'] })}><option>none</option><option>domcontentloaded</option><option>load</option><option>networkidle</option></select></Field>
         <Field label="AI self-healing"><select data-testid="ai-healing" className="inp" value={value.aiHealing ?? 'suggest'} onChange={(e) => onChange({ ...value, aiHealing: e.target.value as ExecutionOptions['aiHealing'] })}><option value="suggest">suggest fixes for review</option><option value="auto">apply fixes automatically</option><option value="off">off</option></select></Field>
+        <Field label="Pause between steps (ms)"><input data-testid="step-delay" className="inp" type="number" min={0} step={100} value={value.stepDelayMs ?? 0} onChange={(e) => onChange({ ...value, stepDelayMs: Math.max(0, Number(e.target.value)) })} /></Field>
+        <label className={`flex items-center gap-1 text-xs ${liveAvailable ? '' : 'text-slate-400'}`} title={liveAvailable ? 'Watch the replay in a real browser window' : 'Needs a display'}>
+          <input data-testid="run-live" type="checkbox" disabled={!liveAvailable} checked={value.headless === false && liveAvailable} onChange={(e) => onChange({ ...value, headless: e.target.checked ? false : undefined })} /> Run in a live browser window
+        </label>
         <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={!!value.continueOnFailure} onChange={(e) => onChange({ ...value, continueOnFailure: e.target.checked })} /> Continue on failure</label>
       </div>
     </details>

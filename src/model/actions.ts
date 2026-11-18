@@ -295,7 +295,10 @@ export interface ExecutionOptions {
   screenshots?: 'every-step' | 'on-failure' | 'off';
   /** Wait strategy applied after navigation-like steps. */
   settle?: 'none' | 'load' | 'domcontentloaded' | 'networkidle';
+  /** false = replay in a real, visible browser window (live browser mode). */
   headless?: boolean;
+  /** Pause between steps, so a live replay can be followed by eye. */
+  stepDelayMs?: number;
   variables?: Record<string, string>;
   /**
    * AI healing when every recorded locator fails: 'off'; 'suggest' (heal the run and

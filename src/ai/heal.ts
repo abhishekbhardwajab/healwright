@@ -95,52 +95,59 @@ function frameLocatorRoot(page: Page, t: ElementTarget, frame: Frame): Frame | P
  * data-rp-ai so the model's answer maps back to a node.
  */
 export async function snapshotFrame(frame: Frame, token: string): Promise<SnapshotElement[]> {
-  return frame.evaluate(({ token, max }) => {
-    const rp = (window as any).__rp;
-    const norm = (s: string | null | undefined) => (s ?? '').replace(/\s+/g, ' ').trim();
-    const SEL = 'a,button,input,select,textarea,label,summary,h1,h2,h3,h4,h5,h6,img,[role],[data-testid],[aria-label],[contenteditable],[onclick],[tabindex],li,td,th,p,span,option,dialog,form,section,nav';
-    const all: Element[] = [];
-    const visit = (root: Document | ShadowRoot) => {
-      for (const el of Array.from(root.querySelectorAll('*'))) {
-        if (el.matches(SEL)) all.push(el);
-        if ((el as HTMLElement).shadowRoot) visit((el as HTMLElement).shadowRoot!);
-      }
-    };
-    visit(document);
-    const isVisible = (el: Element) => {
-      const r = el.getBoundingClientRect();
-      const s = getComputedStyle(el);
-      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
-    };
-    const context = (el: Element) => {
-      const parts: string[] = [];
-      for (let e = el.parentElement; e && parts.length < 3; e = e.parentElement) {
-        const tag = e.tagName.toLowerCase();
-        if (['form', 'dialog', 'section', 'nav', 'li', 'tr', 'fieldset', 'article', 'header', 'footer', 'main', 'aside'].includes(tag) || e.getAttribute('role')) {
-          const label = e.getAttribute('aria-label') || e.id || norm(e.querySelector('legend,h1,h2,h3,h4')?.textContent).slice(0, 30);
-          parts.unshift(tag + (label ? ` "${label}"` : ''));
-        }
-      }
-      return parts.join(' > ') || undefined;
-    };
-    const out: any[] = [];
-    for (const el of all) {
-      if (out.length >= max) break;
-      const text = norm((el as HTMLElement).innerText ?? el.textContent).slice(0, 80);
-      const tag = el.tagName.toLowerCase();
-      const interactive = el.matches('a,button,input,select,textarea,summary,[role],[contenteditable],[onclick],[tabindex],option,label');
-      if (!interactive && (!text || text.length > 80)) continue; // keep only short text containers
-      const visible = isVisible(el);
-      if (!visible && !interactive) continue;
-      const attributes: Record<string, string> = {};
-      for (const a of ['id', 'name', 'type', 'placeholder', 'data-testid', 'href', 'aria-label', 'title', 'alt', 'value', 'for']) {
-        const v = el.getAttribute(a);
-        if (v != null && !(a === 'value' && (el as HTMLInputElement).type === 'password')) attributes[a] = v.slice(0, 80);
-      }
-      const index = out.length;
-      el.setAttribute('data-rp-ai', `${token}-${index}`);
-      out.push({ index, tag, role: rp?.getRole(el) ?? el.getAttribute('role') ?? undefined, name: rp ? norm(rp.accessibleName(el)).slice(0, 80) || undefined : undefined, text: text || undefined, attributes, context: context(el), visible });
+  // Sent as source text with a no-op __name shim: when the studio runs under tsx
+  // (npm start), esbuild's keepNames wraps the inner helpers in __name(...) calls
+  // that do not exist in the page ("ReferenceError: __name is not defined").
+  const arg = JSON.stringify({ token, max: MAX_ELEMENTS });
+  return frame.evaluate(`(() => { const __name = (f) => f; return (${snapshotInPage.toString()})(${arg}); })()`) as Promise<SnapshotElement[]>;
+}
+
+/** Runs inside the page. Must be self-contained (no imports, no outer variables). */
+function snapshotInPage({ token, max }: { token: string; max: number }): SnapshotElement[] {
+  const rp = (window as any).__rp;
+  const norm = (s: string | null | undefined) => (s ?? '').replace(/\s+/g, ' ').trim();
+  const SEL = 'a,button,input,select,textarea,label,summary,h1,h2,h3,h4,h5,h6,img,[role],[data-testid],[aria-label],[contenteditable],[onclick],[tabindex],li,td,th,p,span,option,dialog,form,section,nav';
+  const all: Element[] = [];
+  const visit = (root: Document | ShadowRoot) => {
+    for (const el of Array.from(root.querySelectorAll('*'))) {
+      if (el.matches(SEL)) all.push(el);
+      if ((el as HTMLElement).shadowRoot) visit((el as HTMLElement).shadowRoot!);
     }
-    return out;
-  }, { token, max: MAX_ELEMENTS });
+  };
+  visit(document);
+  const isVisible = (el: Element) => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  const context = (el: Element) => {
+    const parts: string[] = [];
+    for (let e = el.parentElement; e && parts.length < 3; e = e.parentElement) {
+      const tag = e.tagName.toLowerCase();
+      if (['form', 'dialog', 'section', 'nav', 'li', 'tr', 'fieldset', 'article', 'header', 'footer', 'main', 'aside'].includes(tag) || e.getAttribute('role')) {
+        const label = e.getAttribute('aria-label') || e.id || norm(e.querySelector('legend,h1,h2,h3,h4')?.textContent).slice(0, 30);
+        parts.unshift(tag + (label ? ` "${label}"` : ''));
+      }
+    }
+    return parts.join(' > ') || undefined;
+  };
+  const out: any[] = [];
+  for (const el of all) {
+    if (out.length >= max) break;
+    const text = norm((el as HTMLElement).innerText ?? el.textContent).slice(0, 80);
+    const tag = el.tagName.toLowerCase();
+    const interactive = el.matches('a,button,input,select,textarea,summary,[role],[contenteditable],[onclick],[tabindex],option,label');
+    if (!interactive && (!text || text.length > 80)) continue; // keep only short text containers
+    const visible = isVisible(el);
+    if (!visible && !interactive) continue;
+    const attributes: Record<string, string> = {};
+    for (const a of ['id', 'name', 'type', 'placeholder', 'data-testid', 'href', 'aria-label', 'title', 'alt', 'value', 'for']) {
+      const v = el.getAttribute(a);
+      if (v != null && !(a === 'value' && (el as HTMLInputElement).type === 'password')) attributes[a] = v.slice(0, 80);
+    }
+    const index = out.length;
+    el.setAttribute('data-rp-ai', `${token}-${index}`);
+    out.push({ index, tag, role: rp?.getRole(el) ?? el.getAttribute('role') ?? undefined, name: rp ? norm(rp.accessibleName(el)).slice(0, 80) || undefined : undefined, text: text || undefined, attributes, context: context(el), visible });
+  }
+  return out;
 }

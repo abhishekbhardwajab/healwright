@@ -10,7 +10,7 @@ import { ReplayEngine } from '../replay/ReplayEngine.js';
 import { generatePlaywrightTest } from '../codegen/playwright.js';
 import { JsonFileStore } from '../store/Store.js';
 import { newId, type Action, type ExecutionOptions, type TestCase } from '../model/actions.js';
-import { closeBrowser } from '../recorder/browser.js';
+import { closeBrowser, liveBrowserAvailable } from '../recorder/browser.js';
 import type { AiModel } from '../ai/types.js';
 import { AiUnavailableError } from '../ai/types.js';
 import { aiFromEnv } from '../ai/claude.js';
@@ -71,7 +71,7 @@ export async function startServer(cfg: ServerConfig) {
     });
     // late joiners get current state
     for (const s of sessions.values()) {
-      ws.send(JSON.stringify({ t: 'session', sessionId: s.id, mode: s.mode }));
+      ws.send(JSON.stringify({ t: 'session', sessionId: s.id, mode: s.mode, live: s.live }));
       ws.send(JSON.stringify({ t: 'actions', sessionId: s.id, actions: s.actions }));
     }
   });
@@ -87,8 +87,9 @@ export async function startServer(cfg: ServerConfig) {
   // --- recording sessions -------------------------------------------------------
   app.post('/api/sessions', wrap(async (req) => {
     if (sessions.size >= (cfg.maxSessions ?? 3)) throw new Error('Too many active recording sessions');
-    const { url, testId, viewport } = req.body as { url?: string; testId?: string; viewport?: { width: number; height: number } };
-    const s = new RecorderSession({ artifactsDir, uploadsDir: path.join(uploadsDir, 'tmp'), viewport });
+    const { url, testId, viewport, live } = req.body as { url?: string; testId?: string; viewport?: { width: number; height: number }; live?: boolean };
+    if (live && !liveBrowserAvailable()) throw new Error('Live browser needs a display. Run the studio on your desktop, or start it with "xvfb-run npm start" on a server.');
+    const s = new RecorderSession({ artifactsDir, uploadsDir: path.join(uploadsDir, 'tmp'), viewport, live: !!live });
     sessions.set(s.id, s);
     if (testId) { const t = test(testId); s.testId = t.id; s.actions = JSON.parse(JSON.stringify(t.actions)); const v = vaults.get(testId); if (v) s.vault.mergeFrom(v); }
     s.on('frame', (f) => broadcast({ t: 'frame', sessionId: s.id, ...f }));
@@ -100,11 +101,17 @@ export async function startServer(cfg: ServerConfig) {
     s.on('selectOpen', (p) => broadcast({ t: 'selectOpen', sessionId: s.id, ...p }));
     s.on('log', (l) => broadcast({ t: 'log', sessionId: s.id, ...l }));
     s.on('mode', (m) => broadcast({ t: 'mode', sessionId: s.id, mode: m }));
+    s.on('windowClosed', () => broadcast({ t: 'windowClosed', sessionId: s.id }));
     s.on('closed', () => { sessions.delete(s.id); broadcast({ t: 'sessionClosed', sessionId: s.id }); });
-    await s.start();
+    try {
+      await s.start();
+    } catch (e) {
+      await s.stop();
+      throw e;
+    }
     await s.startScreencast();
     if (url) await s.navigate(url);
-    return { id: s.id, viewport: s.viewport };
+    return { id: s.id, viewport: s.viewport, live: s.live };
   }));
   app.post('/api/sessions/:id/navigate', wrap((req) => session(req.params.id).navigate(String(req.body.url))));
   app.post('/api/sessions/:id/history', wrap((req) => session(req.params.id).history(req.body.kind)));
@@ -183,6 +190,9 @@ export async function startServer(cfg: ServerConfig) {
   // --- executions ---------------------------------------------------------------------
   app.post('/api/tests/:id/run', wrap(async (req) => {
     if (runs.size >= (cfg.maxExecutions ?? 2)) throw new Error('Execution capacity reached; try again shortly');
+    if ((req.body as { options?: ExecutionOptions }).options?.headless === false && !liveBrowserAvailable()) {
+      throw new Error('Live browser needs a display. Run the studio on your desktop, or start it with "xvfb-run npm start" on a server.');
+    }
     const t = test(req.params.id);
     const { options = {}, liveSessionId } = req.body as { options?: ExecutionOptions; liveSessionId?: string };
     const live = liveSessionId ? session(liveSessionId) : undefined;
@@ -235,6 +245,7 @@ export async function startServer(cfg: ServerConfig) {
   }));
 
   // --- AI: prompt-driven editing ---------------------------------------------------------
+  app.get('/api/status', wrap(() => ({ liveBrowser: liveBrowserAvailable(), ai: { enabled: !!ai, model: ai?.name ?? null } })));
   app.get('/api/ai/status', wrap(() => ({ enabled: !!ai, model: ai?.name ?? null })));
   app.post('/api/tests/:id/ai/edit', wrap(async (req) => {
     if (!ai) throw new AiUnavailableError('AI is not configured. Set ANTHROPIC_API_KEY and restart the studio.');
@@ -244,7 +255,7 @@ export async function startServer(cfg: ServerConfig) {
     if (instruction.length > 4000) throw new Error('Instruction too long (max 4000 characters)');
     // With a live recording session, let the model see what is on the page.
     const live = req.body.sessionId ? sessions.get(String(req.body.sessionId)) : undefined;
-    const pageElements = live ? await snapshotFrame(live.page.mainFrame(), `e${Date.now().toString(36)}`).catch(() => undefined) : undefined;
+    const pageElements = live?.page ? await snapshotFrame(live.page.mainFrame(), `e${Date.now().toString(36)}`).catch(() => undefined) : undefined;
     const p = await proposeEdit(ai, t, instruction, pageElements);
     edits.set(p.id, p);
     return p;

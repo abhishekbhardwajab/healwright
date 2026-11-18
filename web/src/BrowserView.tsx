@@ -6,6 +6,9 @@ interface Props {
   send: (m: unknown) => void;
   registerFrameSink: (fn: (data: string) => void) => void;
   mode: string;
+  /** The session records in a live browser window; this view mirrors it. */
+  live?: boolean;
+  windowClosed?: boolean;
 }
 
 /**
@@ -13,7 +16,7 @@ interface Props {
  * keyboard input to the real Chromium page, where Playwright dispatches it as
  * trusted input (so the injected recorder sees genuine user events).
  */
-export function BrowserView({ sessionId, viewport, send, registerFrameSink, mode }: Props) {
+export function BrowserView({ sessionId, viewport, send, registerFrameSink, mode, live, windowClosed }: Props) {
   const img = useRef<HTMLImageElement>(null);
   const lastMove = useRef(0);
 
@@ -31,7 +34,7 @@ export function BrowserView({ sessionId, viewport, send, registerFrameSink, mode
   if (!sessionId) {
     return (
       <div className="flex-1 flex items-center justify-center text-slate-400 text-sm bg-slate-50 border border-dashed border-slate-300 rounded">
-        Enter a URL and press Record to open a live browser here.
+        Enter any URL and press Record. Tick "Live window" to record in a real browser window instead of this view.
       </div>
     );
   }
@@ -60,6 +63,8 @@ export function BrowserView({ sessionId, viewport, send, registerFrameSink, mode
         onContextMenu={(e) => e.preventDefault()}
         onWheel={(e) => input({ type: 'wheel', ...pos(e), deltaX: e.deltaX, deltaY: e.deltaY })}
       />
+      {live && !windowClosed && <div data-testid="live-banner" className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-indigo-600/90 text-white text-xs px-3 py-1 rounded shadow pointer-events-none">Live window: work in the browser window that opened. This view mirrors it.</div>}
+      {live && windowClosed && <div data-testid="live-closed" className="absolute inset-0 flex items-center justify-center bg-slate-800/90 text-white text-sm p-6 text-center">The live browser window was closed. Press Stop to save, or enter a URL to open it again.</div>}
       {mode === 'assert' && <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-orange-500 text-white text-xs px-3 py-1 rounded shadow">Click an element to add an assertion</div>}
       {mode === 'paused' && <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-amber-500 text-white text-xs px-3 py-1 rounded shadow">Recording paused: interactions are not captured</div>}
     </div>
