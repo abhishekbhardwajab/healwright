@@ -218,7 +218,7 @@ See [`schema.sql`](schema.sql). It covers tenants, projects, suites, test cases,
 - **Closed shadow roots and cross-origin iframes behave differently:** closed shadow roots cannot be reached, while cross-origin iframes work because the recorder is injected into every frame.
 - **AI features were not run against live Claude in this environment** (no API key was available). Everything around the model call is tested with a scripted model; `tests/ai-live.spec.ts` covers the real API and runs when `ANTHROPIC_API_KEY` is set. Healing adds model latency (typically seconds) to a broken step, and each heal or edit is a paid API call.
 - **AI edit proposals live in server memory** and are lost on restart; ask again.
-- **Tested only against the local fixture site and in headless Chromium.** Some sites detect automation, use CAPTCHAs, or depend on native popups such as `<select>` (handled by the overlay), date pickers or print dialogs. These have not been exercised.
+- **Tested only against the local fixture site**, in headless Chromium and in live (headed) windows under Xvfb. Some sites detect automation, use CAPTCHAs, or depend on native popups such as `<select>` (handled by the overlay), date pickers or print dialogs. These have not been exercised.
 
 ## 8. AI self-healing and prompt editing
 

@@ -34,7 +34,16 @@ export interface RecorderOptions {
   secrets?: 'vault' | 'never';
   screencast?: boolean;
   screenshots?: boolean;
+  /**
+   * Live browser mode: record in a real, visible Chromium window on the machine
+   * running the studio. The user works directly in that window (address bar,
+   * tabs, back/forward and native dropdowns included); the studio mirrors it.
+   */
+  live?: boolean;
 }
+
+/** Address-bar style transitions (Chromium's PAGE_TRANSITION_* core types). */
+const BROWSER_UI_TRANSITIONS = new Set(['typed', 'auto_bookmark', 'generated', 'keyword', 'keyword_generated']);
 
 /**
  * A recording session = one isolated BrowserContext + the event pipeline that
@@ -63,6 +72,11 @@ export class RecorderSession extends EventEmitter {
   private expectingNav = false;
   private shotTimer?: NodeJS.Timeout;
   private closed = false;
+  /** Alias forced on the next page that opens (re-opening the window after it was closed). */
+  private nextAlias?: string;
+  /** Live mode: per-tab browser history position, to tell back/forward/typed URLs apart. */
+  private navHistory = new WeakMap<Page, { index: number; length: number }>();
+  private historyCdp = new WeakMap<Page, CDPSession>();
 
   constructor(readonly opts: RecorderOptions) {
     super();
@@ -72,9 +86,10 @@ export class RecorderSession extends EventEmitter {
 
   get viewport() { return this.opts.viewport ?? { width: 1280, height: 800 }; }
   get page(): Page { return this.pages.get(this.activeAlias)!; }
+  get live() { return !!this.opts.live; }
 
   async start(url?: string) {
-    const browser = await getBrowser();
+    const browser = await getBrowser({ headed: this.live });
     this.context = await browser.newContext({ viewport: this.viewport, acceptDownloads: true });
     await this.context.exposeBinding('__rp_emit', (source, ev: RawEvent) => {
       // serialize: preserves event order and lets async enrichment finish in order
@@ -89,12 +104,16 @@ export class RecorderSession extends EventEmitter {
   }
 
   private attachPage(p: Page) {
-    const alias = this.pageCounter === 0 ? 'page' : `page${this.pageCounter}`;
-    this.pageCounter++;
+    const reopened = this.nextAlias;
+    this.nextAlias = undefined;
+    const alias = reopened ?? (this.pageCounter === 0 ? 'page' : `page${this.pageCounter}`);
+    if (!reopened) this.pageCounter++;
     this.pages.set(alias, p);
     this.aliasOf.set(p, alias);
-    const opener = this.pageCounter > 1;
-    if (opener) {
+    if (this.live) void this.trackHistory(p);
+    if (reopened) {
+      void this.switchTab(alias, false);
+    } else if (this.pageCounter > 1) {
       // A new tab opened while recording: attribute it to the action that caused it.
       this.attachSignal({ popup: alias }, 3000);
       this.log('info', `New tab opened: ${alias}`);
@@ -103,7 +122,9 @@ export class RecorderSession extends EventEmitter {
     p.on('framenavigated', (f) => {
       if (f !== p.mainFrame()) return;
       if (alias === this.activeAlias) this.emit('url', f.url());
-      if (!this.expectingNav) this.attachSignal({ navigation: { url: f.url() } }, 2000, false, (a) => a.type !== 'navigate');
+      const expecting = this.expectingNav;
+      if (this.live) { void this.onLiveNavigation(p, f.url(), expecting); return; }
+      if (!expecting) this.attachSignal({ navigation: { url: f.url() } }, 2000, false, (a) => a.type !== 'navigate');
     });
     p.on('dialog', async (d) => {
       const signal = { type: d.type(), message: d.message(), response: 'accept' as const, promptText: d.type() === 'prompt' ? d.defaultValue() : undefined };
@@ -123,10 +144,14 @@ export class RecorderSession extends EventEmitter {
     });
     p.on('pageerror', (e) => this.log('warn', `[${alias}] page error: ${e.message}`));
     p.on('close', () => {
-      this.pages.delete(alias);
+      if (this.pages.get(alias) === p) this.pages.delete(alias);
       if (this.activeAlias === alias) {
         const next = [...this.pages.keys()][0];
         if (next && !this.closed) void this.switchTab(next, false);
+      }
+      if (this.live && !this.closed && this.pages.size === 0) {
+        this.log('warn', 'The live browser window was closed. Press Stop to save the recording, or enter a URL to open the window again.');
+        this.emit('windowClosed');
       }
       this.emitTabs();
     });
@@ -151,6 +176,54 @@ export class RecorderSession extends EventEmitter {
       } else if (park) {
         this.pendingSignals = { ...this.pendingSignals, ...patch };
       }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Live browser window: navigation done with the browser's own UI
+  // ---------------------------------------------------------------------------
+  private async trackHistory(p: Page) {
+    try {
+      const cdp = await this.context.newCDPSession(p);
+      this.historyCdp.set(p, cdp);
+      const h = await cdp.send('Page.getNavigationHistory');
+      if (!this.navHistory.has(p)) this.navHistory.set(p, { index: h.currentIndex, length: h.entries.length });
+    } catch { /* page closed */ }
+  }
+
+  /**
+   * In a live window the user can type a URL, go back/forward or reload with the
+   * browser's own controls; none of those produce DOM events. Chromium's
+   * navigation history tells them apart from link clicks and redirects:
+   * back/forward move the history index without adding entries, and address-bar
+   * navigations carry a 'typed'-like transition type.
+   */
+  private async onLiveNavigation(p: Page, url: string, expecting: boolean) {
+    const cdp = this.historyCdp.get(p);
+    let kind: 'navigate' | 'goBack' | 'goForward' | 'reload' | null = null;
+    if (cdp) {
+      try {
+        const h = await cdp.send('Page.getNavigationHistory');
+        const prev = this.navHistory.get(p);
+        const entry = h.entries[h.currentIndex];
+        this.navHistory.set(p, { index: h.currentIndex, length: h.entries.length });
+        if (prev && h.entries.length === prev.length && h.currentIndex === prev.index - 1) kind = 'goBack';
+        else if (prev && h.entries.length === prev.length && h.currentIndex === prev.index + 1) kind = 'goForward';
+        else if (entry?.transitionType === 'reload' && prev && h.currentIndex === prev.index) kind = 'reload';
+        else if (entry && BROWSER_UI_TRANSITIONS.has(entry.transitionType) && h.currentIndex !== prev?.index) kind = 'navigate';
+      } catch { /* page closed meanwhile */ }
+    }
+    if (expecting) return; // started from the studio, which records the step itself
+    const alias = this.aliasOf.get(p) ?? this.activeAlias;
+    if (!kind || p.isClosed()) {
+      this.attachSignal({ navigation: { url } }, 2000, false, (a) => a.type !== 'navigate');
+      return;
+    }
+    this.queue = this.queue.then(() => {
+      if (this.mode !== 'record' || this.closed) return;
+      const base = { id: newId('step'), timestamp: Date.now(), pageAlias: alias, metadata: { url } };
+      this.push(kind === 'navigate' ? { ...base, type: 'navigate', url } : { ...base, type: kind! });
+      this.log('info', `Recorded browser ${kind === 'navigate' ? `navigation to ${url}` : kind}`);
     });
   }
 
@@ -195,6 +268,9 @@ export class RecorderSession extends EventEmitter {
   private async onRawEvent(frame: Frame, page: Page, ev: RawEvent) {
     if (this.closed) return;
     const alias = this.aliasOf.get(page) ?? 'page';
+    // In a live window the user can switch tabs with the browser's own tab strip, which
+    // the page cannot observe. Their first interaction in another tab makes it the active one.
+    if (this.live && alias !== this.activeAlias && this.pages.get(alias) === page) await this.switchTab(alias, true, false);
     // Keystrokes into the same field are merged: verify only the first one.
     const last = this.actions[this.actions.length - 1];
     const merging = ev.kind === 'fill' && last?.type === 'fill' && !!ev.target && JSON.stringify(last.target?.selectors.map((x) => [x.strategy, x.value])) === JSON.stringify(ev.target.selectors.map((x) => [x.strategy, x.value]));
@@ -205,6 +281,8 @@ export class RecorderSession extends EventEmitter {
     }
     if (this.mode !== 'record') return;
     if (ev.kind === 'selectOpen') {
+      // A live window shows the native dropdown; its 'change' is recorded as usual.
+      if (this.live) return;
       this.emit('selectOpen', { target, options: ev.options, multiple: ev.multiple, pageAlias: alias });
       return;
     }
@@ -308,6 +386,12 @@ export class RecorderSession extends EventEmitter {
   // ---------------------------------------------------------------------------
   async navigate(url: string) {
     if (!/^https?:|^about:|^file:|^data:/.test(url)) url = 'https://' + url;
+    if (!this.page) {
+      // Live window closed by the user: open a fresh one that continues as the main tab.
+      if (!this.live || this.closed) throw new Error('No open tab');
+      this.nextAlias = this.activeAlias;
+      await this.context.newPage();
+    }
     const page = this.page;
     this.expectingNav = true;
     try {
@@ -335,8 +419,11 @@ export class RecorderSession extends EventEmitter {
     this.emit('mode', mode);
   }
 
-  /** @param userInitiated record a switchTab step (true when the user picked a tab in the studio). */
-  async switchTab(alias: string, userInitiated = true) {
+  /**
+   * @param userInitiated record a switchTab step (true when the user picked a tab).
+   * @param focus bring the tab to the front (false when the user already did, in the live window).
+   */
+  async switchTab(alias: string, userInitiated = true, focus = true) {
     const p = this.pages.get(alias);
     if (!p || this.closed) return;
     const prev = this.activeAlias;
@@ -344,7 +431,7 @@ export class RecorderSession extends EventEmitter {
     if (userInitiated && prev !== alias && this.mode === 'record') {
       this.push({ id: newId('step'), type: 'switchTab', timestamp: Date.now(), pageAlias: alias, metadata: { url: p.url() } });
     }
-    await p.bringToFront().catch(() => {});
+    if (focus) await p.bringToFront().catch(() => {});
     await this.startScreencast();
     this.emit('url', p.url());
     this.emitTabs();

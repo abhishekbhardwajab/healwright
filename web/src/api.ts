@@ -22,7 +22,8 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
 }
 
 export const api = {
-  startSession: (url: string, testId?: string) => call<{ id: string; viewport: { width: number; height: number } }>('POST', '/api/sessions', { url, testId }),
+  startSession: (url: string, testId?: string, live?: boolean) => call<{ id: string; viewport: { width: number; height: number }; live: boolean }>('POST', '/api/sessions', { url, testId, live }),
+  status: () => call<{ liveBrowser: boolean; ai: { enabled: boolean; model: string | null } }>('GET', '/api/status'),
   navigate: (id: string, url: string) => call('POST', `/api/sessions/${id}/navigate`, { url }),
   history: (id: string, kind: 'goBack' | 'goForward' | 'reload') => call('POST', `/api/sessions/${id}/history`, { kind }),
   mode: (id: string, mode: string) => call('POST', `/api/sessions/${id}/mode`, { mode }),

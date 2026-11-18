@@ -720,6 +720,8 @@
     } else {
       if (!SPECIAL_KEYS.has(ev.key) && !hasMod) return;
       if (ev.key === ' ' && el && (el.tagName === 'BUTTON' || isToggle(el))) return; // becomes click/change
+      // Keys that only move through a native dropdown's options are recorded by its 'change'.
+      if (el && el.tagName === 'SELECT' && !hasMod && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', ' ', 'Enter', 'Escape'].includes(ev.key)) return;
     }
     if (ev.shiftKey && (hasMod || SPECIAL_KEYS.has(ev.key))) mods.push('Shift');
     const key = ev.key === ' ' ? 'Space' : (ev.key.length === 1 ? ev.key.toLowerCase() : ev.key);
