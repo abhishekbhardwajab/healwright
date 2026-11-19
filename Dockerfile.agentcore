@@ -1,0 +1,15 @@
+# healwright test-run worker for Amazon Bedrock AgentCore Runtime.
+# AgentCore Runtime runs ARM64 containers and calls them on port 8080 (/invocations, /ping).
+# No browser is installed: browsers come from AgentCore Browser, Claude from Amazon Bedrock.
+#   docker buildx build --platform linux/arm64 -f Dockerfile.agentcore -t healwright-agentcore .
+FROM --platform=linux/arm64 node:22-bookworm-slim
+WORKDIR /app
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 NODE_ENV=production
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund && npm cache clean --force
+COPY tsconfig.json ./
+COPY src ./src
+ENV PORT=8080 BROWSER_PROVIDER=agentcore AI_PROVIDER=bedrock
+USER node
+EXPOSE 8080
+CMD ["npx", "tsx", "src/agentcore/runtime.ts"]

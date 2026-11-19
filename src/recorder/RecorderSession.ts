@@ -3,7 +3,7 @@ import { readFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { BrowserContext, CDPSession, Frame, Page, FileChooser } from 'playwright';
-import { getBrowser } from './browser.js';
+import { openContext, type BrowserLease } from './browser.js';
 import {
   newId, type Action, type ElementTarget, type SelectorCandidate, type FrameHop, type FillAction, type ActionSignals,
 } from '../model/actions.js';
@@ -58,6 +58,7 @@ export class RecorderSession extends EventEmitter {
   /** Saved test this session is recording into, once known. */
   testId?: string;
   context!: BrowserContext;
+  private lease?: BrowserLease;
   actions: Action[] = [];
   mode: RecorderMode = 'record';
   readonly vault = new SecretVault();
@@ -90,8 +91,8 @@ export class RecorderSession extends EventEmitter {
   get live() { return !!this.opts.live; }
 
   async start(url?: string) {
-    const browser = await getBrowser({ headed: this.live });
-    this.context = await browser.newContext({ viewport: this.viewport, acceptDownloads: true });
+    this.lease = await openContext({ headed: this.live, viewport: this.viewport, label: 'healwright-recording' });
+    this.context = this.lease.context;
     await this.context.exposeBinding('__rp_emit', (source, ev: RawEvent) => {
       // serialize: preserves event order and lets async enrichment finish in order
       this.queue = this.queue.then(() => this.onRawEvent(source.frame, source.page, ev)).catch((e) => this.log('error', String(e)));
@@ -519,7 +520,7 @@ export class RecorderSession extends EventEmitter {
     this.closed = true;
     clearTimeout(this.shotTimer);
     await this.queue.catch(() => {});
-    await this.context?.close().catch(() => {});
+    await (this.lease?.close() ?? this.context?.close())?.catch(() => {});
     this.emit('closed');
   }
 }

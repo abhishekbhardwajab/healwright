@@ -1,4 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
+import Anthropic, { betaRefusalFallbackMiddleware } from '@anthropic-ai/sdk';
+import { AnthropicBedrockMantle } from '@anthropic-ai/bedrock-sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import type { z } from 'zod/v4';
 import {
@@ -7,6 +8,19 @@ import {
 } from './types.js';
 
 export const DEFAULT_MODEL = 'claude-opus-5-5';
+/** Bedrock model IDs carry an `anthropic.` prefix. */
+export const DEFAULT_BEDROCK_MODEL = 'anthropic.claude-opus-5-5';
+export const DEFAULT_BEDROCK_FALLBACK_MODEL = 'anthropic.claude-opus-4-8';
+
+export type AiProvider = 'anthropic' | 'bedrock';
+
+/** `AI_PROVIDER=bedrock` sends Claude requests to Amazon Bedrock with AWS credentials (IAM role, profile or env). */
+export function aiProvider(): AiProvider {
+  return process.env.AI_PROVIDER === 'bedrock' ? 'bedrock' : 'anthropic';
+}
+
+/** The subset of the SDK both the Claude API client and the Bedrock client expose. */
+type MessagesClient = Pick<Anthropic, 'beta'>;
 
 const HEAL_SYSTEM = `You repair broken element locators for a browser test replay engine.
 
@@ -57,18 +71,45 @@ Rules:
 
 export interface ClaudeOptions {
   model?: string;
-  client?: Anthropic;
+  client?: MessagesClient;
+  provider?: AiProvider;
+  /** Called with the token usage of every request (metering / per-tenant billing). */
+  onUsage?: (u: AiUsage) => void;
 }
+
+export interface AiUsage { model: string; inputTokens: number; outputTokens: number; cacheReadTokens: number }
 
 /** Claude via the Anthropic SDK with structured outputs, so replies always parse. */
 export class ClaudeModel implements AiModel {
   readonly name: string;
-  private client: Anthropic;
+  readonly provider: AiProvider;
+  private client: MessagesClient;
+  private onUsage?: (u: AiUsage) => void;
+
+  /** A copy that shares this client but reports usage to its own listener (one per run). */
+  withUsageListener(onUsage: (u: AiUsage) => void): ClaudeModel {
+    return new ClaudeModel({ model: this.name, client: this.client, provider: this.provider, onUsage });
+  }
 
   constructor(opts: ClaudeOptions = {}) {
-    this.name = opts.model ?? process.env.AI_MODEL ?? DEFAULT_MODEL;
-    // Credentials resolve from the environment (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an `ant auth login` profile).
-    this.client = opts.client ?? new Anthropic();
+    this.onUsage = opts.onUsage;
+    this.provider = opts.provider ?? aiProvider();
+    const bedrock = this.provider === 'bedrock';
+    this.name = opts.model ?? process.env.AI_MODEL ?? (bedrock ? DEFAULT_BEDROCK_MODEL : DEFAULT_MODEL);
+    if (opts.client) {
+      this.client = opts.client;
+    } else if (bedrock) {
+      // Region from AWS_REGION; credentials from the default AWS provider chain (on AgentCore
+      // Runtime or ECS that is the task/execution role). Bedrock has no server-side `fallbacks`,
+      // so refusals are retried client-side on the fallback model.
+      const fallback = process.env.AI_FALLBACK_MODEL ?? DEFAULT_BEDROCK_FALLBACK_MODEL;
+      this.client = new AnthropicBedrockMantle({
+        middleware: fallback === 'none' ? [] : [betaRefusalFallbackMiddleware([{ model: fallback }])],
+      }) as unknown as MessagesClient;
+    } else {
+      // Credentials resolve from the environment (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an `ant auth login` profile).
+      this.client = new Anthropic();
+    }
   }
 
   heal(req: HealRequest): Promise<HealResponse> {
@@ -87,19 +128,25 @@ export class ClaudeModel implements AiModel {
       response = await this.client.beta.messages.parse({
         model: this.name,
         max_tokens: 16000,
-        // If a safety classifier declines, retry server-side on a fallback model.
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
+        // If a safety classifier declines, retry server-side on a fallback model
+        // (Claude API only; on Bedrock the client middleware does this).
+        ...(this.provider === 'anthropic' ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
         output_config: { effort, format: betaZodOutputFormat(schema) },
         system,
         messages: [{ role: 'user', content }],
       });
     } catch (e) {
-      if (e instanceof Anthropic.AuthenticationError) throw new AiUnavailableError('Claude API credentials are missing or invalid. Set ANTHROPIC_API_KEY.');
+      if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) {
+        throw new AiUnavailableError(this.provider === 'bedrock'
+          ? 'Amazon Bedrock rejected the AWS credentials or the role lacks Bedrock access to this model. Check AWS_REGION, the IAM role and model access.'
+          : 'Claude API credentials are missing or invalid. Set ANTHROPIC_API_KEY.');
+      }
       if (e instanceof Anthropic.RateLimitError) throw new AiUnavailableError('Claude API rate limit reached; try again shortly.');
       if (e instanceof Anthropic.APIError) throw new AiUnavailableError(`Claude API error ${e.status}: ${e.message}`);
       throw e;
     }
+    const u = response.usage;
+    this.onUsage?.({ model: response.model ?? this.name, inputTokens: u?.input_tokens ?? 0, outputTokens: u?.output_tokens ?? 0, cacheReadTokens: u?.cache_read_input_tokens ?? 0 });
     if (response.stop_reason === 'refusal') throw new AiUnavailableError('The model declined this request.');
     if (response.stop_reason === 'max_tokens') throw new AiUnavailableError('The model response was cut off (max_tokens).');
     if (!response.parsed_output) throw new AiUnavailableError('The model returned an unparseable response.');
@@ -107,9 +154,10 @@ export class ClaudeModel implements AiModel {
   }
 }
 
-/** Claude is used when credentials are configured, unless AI_ENABLED=false. */
+/** Claude is used when credentials are configured (or AI_PROVIDER=bedrock), unless AI_ENABLED=false. */
 export function aiFromEnv(): AiModel | undefined {
   if (process.env.AI_ENABLED === 'false') return undefined;
+  if (aiProvider() === 'bedrock') return new ClaudeModel({ provider: 'bedrock' });
   const hasCreds = !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_PROFILE || process.env.AI_ENABLED === 'true');
   return hasCreds ? new ClaudeModel() : undefined;
 }

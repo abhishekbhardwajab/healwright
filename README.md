@@ -164,6 +164,12 @@ Set `ANTHROPIC_API_KEY` before `npm start` to turn on two features. Without a ke
 | `AI_MODEL` | `claude-opus-5-5` | Claude model used for both features |
 | `AI_ENABLED` | auto | `false` turns AI off even when a key is set |
 | `AI_HEAL_MIN_CONFIDENCE` | `0.7` | Minimum model confidence for an AI heal to be used |
+| `AI_PROVIDER` | `anthropic` | `bedrock` sends Claude requests to Amazon Bedrock with AWS credentials instead of an API key (model default `anthropic.claude-opus-5-5`) |
+| `AI_FALLBACK_MODEL` | `anthropic.claude-opus-4-8` | Bedrock only: model that retries a request the main model declines (`none` turns it off) |
+| `BROWSER_PROVIDER` | `local` | `agentcore` runs every recording and replay in its own Amazon Bedrock AgentCore Browser session instead of a local Chromium |
+| `AGENTCORE_BROWSER_ID` | `aws.browser.v1` | AgentCore browser to use (a custom browser adds S3 session recording) |
+| `AGENTCORE_BROWSER_TIMEOUT_S` | `3600` | Upper bound for one AgentCore browser session (max 28800) |
+| `AWS_REGION` | `us-west-2` | Region for AgentCore and Bedrock |
 
 ### Docker
 
@@ -172,6 +178,10 @@ docker compose up --build
 ```
 
 The image is based on `mcr.microsoft.com/playwright:v1.63.0-noble`. It has not been built in the environment where this PoC was developed. See the limitations in docs/ARCHITECTURE.md.
+
+### AWS (Amazon Bedrock AgentCore)
+
+healwright can run on AWS as a multi-tenant service: browsers from AgentCore Browser, test runs on AgentCore Runtime, Claude from Amazon Bedrock. See [docs/AGENTCORE.md](docs/AGENTCORE.md) for the architecture, deployment (`deploy/agentcore/deploy.sh`), costs and the SaaS plan.
 
 ## Security
 
@@ -196,10 +206,11 @@ npm run dev       # hot reload: API on :3000, UI on :5173
 ## Tests
 
 ```bash
-npm test          # 49 tests: 20 recording/replay scenarios, generated specs run by Playwright Test, UI end-to-end,
+npm test          # 62 tests: 20 recording/replay scenarios, generated specs run by Playwright Test, UI end-to-end,
                   # codegen units, 11 AI healing/editing tests and an AI UI end-to-end (scripted model),
                   # 6 security regression tests (auth/CSRF/WebSocket/navigation),
                   # 5 live browser window tests (skipped without a display; use `xvfb-run -a npm test` on a server),
+                  # 11 AgentCore tests (runtime worker contract, browser provider, Bedrock signing; no AWS needed),
                   # plus 2 live-Claude tests that are skipped unless ANTHROPIC_API_KEY is set
 npm run metrics   # writes docs/TEST_RESULTS.md from the last run
 npm run typecheck
@@ -221,6 +232,10 @@ src/ai/claude.ts              Claude client (structured outputs), prompts, env c
 src/ai/heal.ts                page snapshot, AI element choice, locator rebuild and verification
 src/ai/edit.ts                prompt edits: operation validation, apply, diff; heal-proposal apply
 src/server/index.ts           REST + WebSocket API
+src/cloud/agentcore-browser   AgentCore Browser sessions as the browser provider
+src/agentcore/runtime.ts      AgentCore Runtime worker: runs a test per invocation, tenancy, metering
+src/agentcore/invoke.ts       control-plane client / CLI for the worker
+deploy/agentcore/             ARM64 image deploy script and IAM policies
 web/                          React studio (Vite, Tailwind, Monaco)
 fixtures/site/                demo pages used by the tests
 tests/                        scenario, UI, codegen tests
