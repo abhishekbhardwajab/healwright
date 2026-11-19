@@ -9,6 +9,7 @@ import {
   type SelectorCandidate, type StepResult, type TestCase,
 } from '../model/actions.js';
 import { buildLocator, frameRoot, selectorLabel } from '../selectors/locator.js';
+import { assertNavigable } from '../net/navigation.js';
 import type { SecretVault } from '../recorder/secrets.js';
 import { INJECTED } from '../recorder/RecorderSession.js';
 import type { AiModel } from '../ai/types.js';
@@ -107,6 +108,7 @@ export class ReplayEngine extends EventEmitter {
         const first = actions[indices[0]];
         if (first && first.type !== 'navigate' && (this.options.fromStep !== undefined || this.options.onlyStep !== undefined)) {
           this.log('info', `Opening ${first.metadata.url} to start from step ${indices[0] + 1}`);
+          assertNavigable(first.metadata.url);
           await page.goto(first.metadata.url, { waitUntil: 'domcontentloaded' });
         }
       }
@@ -300,7 +302,7 @@ export class ReplayEngine extends EventEmitter {
     const download = a.signals?.download ? page.waitForEvent('download', { timeout }) : null;
 
     switch (a.type) {
-      case 'navigate': await page.goto(a.url, { timeout, waitUntil: 'domcontentloaded' }); break;
+      case 'navigate': assertNavigable(a.url); await page.goto(a.url, { timeout, waitUntil: 'domcontentloaded' }); break;
       case 'goBack': await page.goBack({ timeout, waitUntil: 'domcontentloaded' }); break;
       case 'goForward': await page.goForward({ timeout, waitUntil: 'domcontentloaded' }); break;
       case 'reload': await page.reload({ timeout, waitUntil: 'domcontentloaded' }); break;

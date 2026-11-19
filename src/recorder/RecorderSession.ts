@@ -8,6 +8,7 @@ import {
   newId, type Action, type ElementTarget, type SelectorCandidate, type FrameHop, type FillAction, type ActionSignals,
 } from '../model/actions.js';
 import { SecretVault } from './secrets.js';
+import { assertNavigable } from '../net/navigation.js';
 import { buildLocator, frameRoot } from '../selectors/locator.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -385,7 +386,8 @@ export class RecorderSession extends EventEmitter {
   // Commands from the studio
   // ---------------------------------------------------------------------------
   async navigate(url: string) {
-    if (!/^https?:|^about:|^file:|^data:/.test(url)) url = 'https://' + url;
+    if (!/^[a-zA-Z][\w+.-]*:/.test(url)) url = 'https://' + url;
+    assertNavigable(url, { allowAboutBlank: true });
     if (!this.page) {
       // Live window closed by the user: open a fresh one that continues as the main tab.
       if (!this.live || this.closed) throw new Error('No open tab');

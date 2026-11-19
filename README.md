@@ -154,8 +154,10 @@ Set `ANTHROPIC_API_KEY` before `npm start` to turn on two features. Without a ke
 | Env var | Default | Purpose |
 |---|---|---|
 | `PORT` | 3000 | HTTP and WebSocket port |
+| `HOST` | `127.0.0.1` | Interface to bind. Loopback by default, so the studio is reachable only from this machine. Set `HOST=0.0.0.0` to expose it on the network — which then **requires** `STUDIO_TOKEN`. |
 | `DATA_DIR` | `./data` | Tests, executions, screenshots, uploads |
-| `STUDIO_TOKEN` | unset | If set, the API and WebSocket require `Authorization: Bearer <token>` (UI: `?token=`) |
+| `STUDIO_TOKEN` | unset | If set, the API and WebSocket require `Authorization: Bearer <token>` (UI: `?token=`). Required when `HOST` is not loopback; the startup URL then includes the token. |
+| `ALLOWED_HOSTS` | loopback | Comma-separated extra hostnames accepted in the `Host` header (anti DNS-rebinding). Add your public hostname when exposing the studio. |
 | `HEADED` | unset | Run every session and run in a visible window (same as always ticking *Live window*) |
 | `TEST_*` | | Secret values for replay after a server restart (for example `TEST_PASSWORD`) |
 | `ANTHROPIC_API_KEY` | unset | Enables AI self-healing and prompt editing with Claude |
@@ -171,6 +173,18 @@ docker compose up --build
 
 The image is based on `mcr.microsoft.com/playwright:v1.63.0-noble`. It has not been built in the environment where this PoC was developed. See the limitations in docs/ARCHITECTURE.md.
 
+## Security
+
+The studio drives a real browser and stores your tests, so it is built to be safe to run locally:
+
+- **Loopback by default.** It binds `127.0.0.1`, so nothing on your network can reach it. Expose it deliberately with `HOST=0.0.0.0`, which then requires a `STUDIO_TOKEN`.
+- **Same-origin only.** The API and WebSocket reject requests from other websites (Origin/Host checks), so a page you happen to be visiting can't drive your studio or watch your recordings.
+- **Safe navigation.** Recorded and replayed steps may only open `http(s)` pages; `file://` and other schemes are blocked.
+- **Standard headers.** Responses set a Content-Security-Policy, `X-Frame-Options: DENY`, and `nosniff`.
+- **Secrets stay local.** Password-class values never enter the saved test, the generated code, logs, or the live update stream — they live only in memory and are read from `TEST_*` env vars at replay.
+
+Tests are stored in `data/db.json` in plain text; protect that folder with normal file permissions. For a shared deployment, put the studio behind TLS and set `STUDIO_TOKEN`.
+
 ## Developer quick start
 
 ```bash
@@ -182,8 +196,9 @@ npm run dev       # hot reload: API on :3000, UI on :5173
 ## Tests
 
 ```bash
-npm test          # 43 tests: 20 recording/replay scenarios, generated specs run by Playwright Test, UI end-to-end,
+npm test          # 49 tests: 20 recording/replay scenarios, generated specs run by Playwright Test, UI end-to-end,
                   # codegen units, 11 AI healing/editing tests and an AI UI end-to-end (scripted model),
+                  # 6 security regression tests (auth/CSRF/WebSocket/navigation),
                   # 5 live browser window tests (skipped without a display; use `xvfb-run -a npm test` on a server),
                   # plus 2 live-Claude tests that are skipped unless ANTHROPIC_API_KEY is set
 npm run metrics   # writes docs/TEST_RESULTS.md from the last run

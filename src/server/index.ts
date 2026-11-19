@@ -23,8 +23,15 @@ const ROOT = path.resolve(here, '../..');
 export interface ServerConfig {
   port: number;
   dataDir: string;
+  /** Interface to bind. Defaults to loopback (127.0.0.1); set to 0.0.0.0 to expose on the network. */
+  host?: string;
   /** Optional bearer token required on API + WS. */
   token?: string;
+  /**
+   * Extra hostnames allowed in the Host header (defence against DNS rebinding).
+   * Loopback names are always allowed; add the public hostname when binding to a network interface.
+   */
+  allowedHosts?: string[];
   maxSessions?: number;
   maxExecutions?: number;
   executionTimeoutMs?: number;
@@ -45,6 +52,43 @@ export async function startServer(cfg: ServerConfig) {
   const edits = new Map<string, EditProposal>();
 
   const app = express();
+  app.disable('x-powered-by');
+
+  // --- request-origin guard (CSRF / DNS-rebinding / cross-site WebSocket) -----
+  // The studio serves its UI and API from one origin, so a legitimate browser
+  // request is same-origin. We (a) pin the Host header to an allow-list so a
+  // rebound DNS name cannot reach us, and (b) require any Origin header on a
+  // state-changing request to match that Host. Non-browser clients (curl, the
+  // test runner) send no Origin and are unaffected.
+  const loopback = new Set(['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0']);
+  const allowedHosts = new Set<string>([...loopback]);
+  if (cfg.host) allowedHosts.add(cfg.host.toLowerCase());
+  for (const h of cfg.allowedHosts ?? []) allowedHosts.add(h.toLowerCase());
+  const hostname = (h?: string) => (h ?? '').split(':')[0].replace(/^\[|\]$/g, '').toLowerCase();
+  const hostOk = (req: express.Request) => allowedHosts.has(hostname(req.headers.host));
+  const originOk = (req: express.Request) => {
+    const origin = req.headers.origin;
+    if (!origin) return true; // same-origin navigations and non-browser clients send none
+    try { return new URL(origin).host === req.headers.host; } catch { return false; }
+  };
+  const stateChanging = (m: string) => m === 'POST' || m === 'PUT' || m === 'DELETE' || m === 'PATCH';
+
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    // CSP and framing protection are for the studio's own pages. The bundled demo
+    // site under /fixtures is a deliberate test target (inline scripts and all),
+    // so it is left alone; real targets are loaded in the browser, not served here.
+    if (!req.path.startsWith('/fixtures')) {
+      res.setHeader('X-Frame-Options', 'DENY');
+      res.setHeader('Content-Security-Policy',
+        "default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'none'");
+    }
+    if (!hostOk(req)) return res.status(403).json({ error: 'forbidden host' });
+    if (stateChanging(req.method) && !originOk(req)) return res.status(403).json({ error: 'cross-origin request blocked' });
+    next();
+  });
+
   app.use(express.json({ limit: '15mb' }));
   const server = createServer(app);
   const wss = new WebSocketServer({ server, path: '/ws' });
@@ -60,6 +104,11 @@ export async function startServer(cfg: ServerConfig) {
   app.use('/api', (req, res, next) => (authed(req.headers.authorization) ? next() : res.status(401).json({ error: 'unauthorized' })));
 
   wss.on('connection', (ws, req) => {
+    // Reject cross-site WebSocket connections (an attacker page cannot be allowed
+    // to observe or drive recording sessions) and rebound Host names.
+    if (!hostOk(req as unknown as express.Request)) { ws.close(4403, 'forbidden host'); return; }
+    const origin = req.headers.origin;
+    if (origin) { try { if (new URL(origin).host !== req.headers.host) { ws.close(4403, 'cross-origin'); return; } } catch { ws.close(4403, 'cross-origin'); return; } }
     const tok = new URL(req.url ?? '', 'http://x').searchParams.get('token') ?? undefined;
     if (!authed(tok)) { ws.close(4401, 'unauthorized'); return; }
     clients.add(ws);
@@ -287,7 +336,7 @@ export async function startServer(cfg: ServerConfig) {
     app.get('*', (_req, res) => res.sendFile(path.join(web, 'index.html')));
   }
 
-  await new Promise<void>((r) => server.listen(cfg.port, r));
+  await new Promise<void>((r) => server.listen(cfg.port, cfg.host ?? '127.0.0.1', r));
   const port = (server.address() as { port: number }).port;
   return {
     port,
@@ -304,9 +353,23 @@ export async function startServer(cfg: ServerConfig) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const port = Number(process.env.PORT ?? 3000);
-  startServer({ port, dataDir: process.env.DATA_DIR ?? path.join(ROOT, 'data'), token: process.env.STUDIO_TOKEN }).then((s) => {
-    console.log(`healwright studio on http://localhost:${s.port}`);
-    console.log(`Demo site: http://localhost:${s.port}/fixtures/index.html`);
+  // Default to loopback so the studio is not reachable from the network. Set HOST
+  // (e.g. 0.0.0.0) to expose it, in which case a STUDIO_TOKEN is required.
+  const host = process.env.HOST ?? '127.0.0.1';
+  const isLoopback = host === '127.0.0.1' || host === '::1' || host === 'localhost';
+  const token = process.env.STUDIO_TOKEN;
+  if (!isLoopback && !token) {
+    console.error('Refusing to bind to a non-loopback address without a token.');
+    console.error('Set STUDIO_TOKEN=<secret> (and open the studio with ?token=<secret>), or unset HOST to stay on localhost.');
+    process.exit(1);
+  }
+  const allowedHosts = process.env.ALLOWED_HOSTS?.split(',').map((h) => h.trim()).filter(Boolean);
+  startServer({ port, host, dataDir: process.env.DATA_DIR ?? path.join(ROOT, 'data'), token, allowedHosts }).then((s) => {
+    const shown = host === '0.0.0.0' || host === '::' ? 'localhost' : host;
+    const suffix = token ? `/?token=${encodeURIComponent(token)}` : '';
+    console.log(`healwright studio on http://${shown}:${s.port}${suffix}`);
+    if (!isLoopback) console.log('Exposed on the network: the token above is required.');
+    console.log(`Demo site: http://${shown}:${s.port}/fixtures/index.html`);
   });
   const shutdown = async () => { await closeBrowser(); process.exit(0); };
   process.on('SIGINT', shutdown);
