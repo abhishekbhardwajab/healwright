@@ -10,10 +10,10 @@ import { ReplayEngine } from '../replay/ReplayEngine.js';
 import { generatePlaywrightTest } from '../codegen/playwright.js';
 import { JsonFileStore } from '../store/Store.js';
 import { newId, type Action, type ExecutionOptions, type TestCase } from '../model/actions.js';
-import { closeBrowser, liveBrowserAvailable } from '../recorder/browser.js';
+import { browserProvider, closeBrowser, liveBrowserAvailable } from '../recorder/browser.js';
 import type { AiModel } from '../ai/types.js';
 import { AiUnavailableError } from '../ai/types.js';
-import { aiFromEnv } from '../ai/claude.js';
+import { aiFromEnv, aiProvider } from '../ai/claude.js';
 import { proposeEdit, applyHealProposal, type EditProposal } from '../ai/edit.js';
 import { snapshotFrame } from '../ai/heal.js';
 
@@ -294,10 +294,10 @@ export async function startServer(cfg: ServerConfig) {
   }));
 
   // --- AI: prompt-driven editing ---------------------------------------------------------
-  app.get('/api/status', wrap(() => ({ liveBrowser: liveBrowserAvailable(), ai: { enabled: !!ai, model: ai?.name ?? null } })));
+  app.get('/api/status', wrap(() => ({ liveBrowser: liveBrowserAvailable(), browserProvider: browserProvider(), ai: { enabled: !!ai, model: ai?.name ?? null, provider: ai ? aiProvider() : null } })));
   app.get('/api/ai/status', wrap(() => ({ enabled: !!ai, model: ai?.name ?? null })));
   app.post('/api/tests/:id/ai/edit', wrap(async (req) => {
-    if (!ai) throw new AiUnavailableError('AI is not configured. Set ANTHROPIC_API_KEY and restart the studio.');
+    if (!ai) throw new AiUnavailableError('AI is not configured. Set ANTHROPIC_API_KEY (or AI_PROVIDER=bedrock with AWS credentials) and restart the studio.');
     const t = test(req.params.id);
     const instruction = String(req.body.instruction ?? '').trim();
     if (!instruction) throw new Error('Describe the change you want');

@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import type { BrowserContext, Locator, Page } from 'playwright';
 import { expect } from '@playwright/test';
-import { getBrowser } from '../recorder/browser.js';
+import { openContext, type BrowserLease } from '../recorder/browser.js';
 import {
   newId, describeAction, type Action, type ElementTarget, type Execution, type ExecutionOptions,
   type SelectorCandidate, type StepResult, type TestCase,
@@ -47,6 +47,7 @@ class ResolveError extends Error {}
 export class ReplayEngine extends EventEmitter {
   private stopped = false;
   private context?: BrowserContext;
+  private lease?: BrowserLease;
   private pages = new Map<string, Page>();
   readonly execution: Execution;
 
@@ -71,7 +72,7 @@ export class ReplayEngine extends EventEmitter {
   stop() {
     this.stopped = true;
     this.log('warn', 'Execution stopped by user');
-    if (!this.deps.livePages) void this.context?.close().catch(() => {});
+    if (!this.deps.livePages) void this.closeContext();
   }
 
   private log(level: 'info' | 'warn' | 'error', message: string) {
@@ -95,9 +96,10 @@ export class ReplayEngine extends EventEmitter {
         this.pages = new Map(this.deps.livePages);
       } else {
         const headed = this.o.headless === false;
-        const browser = await getBrowser({ headed });
         if (headed) this.log('info', 'Replaying in a live browser window');
-        this.context = await browser.newContext({ viewport: this.test.viewport, acceptDownloads: true });
+        this.lease = await openContext({ headed, viewport: this.test.viewport, label: `healwright-${this.execution.id}` });
+        if (this.lease.provider === 'agentcore') this.log('info', `Running in AgentCore Browser session ${this.lease.sessionId}`);
+        this.context = this.lease.context;
         this.context.setDefaultTimeout(this.o.stepTimeoutMs);
         // The recorder script is loaded only for its selector engine (used by AI healing);
         // without the recording binding it captures nothing.
@@ -131,10 +133,14 @@ export class ReplayEngine extends EventEmitter {
       this.log('error', `Execution error: ${(e as Error).message}`);
     } finally {
       ex.finishedAt = Date.now();
-      if (!this.deps.livePages) await this.context?.close().catch(() => {});
+      if (!this.deps.livePages) await this.closeContext();
       this.log('info', `Execution ${ex.status} in ${ex.finishedAt - ex.startedAt}ms`);
     }
     return ex;
+  }
+
+  private async closeContext() {
+    await (this.lease?.close() ?? this.context?.close())?.catch(() => {});
   }
 
   /** Sleep that ends early when the run is stopped. */

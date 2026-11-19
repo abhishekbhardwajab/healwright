@@ -1,0 +1,14 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "OnlyTheControlPlaneRunsTests",
+      "Effect": "Allow",
+      "Action": ["bedrock-agentcore:InvokeAgentRuntime"],
+      "Resource": [
+        "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:runtime/healwright_worker-*",
+        "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:runtime/healwright_worker-*/runtime-endpoint/*"
+      ]
+    }
+  ]
+}

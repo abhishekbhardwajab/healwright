@@ -4,13 +4,19 @@
  * legitimate same-origin / non-browser paths still work.
  */
 import { test, expect } from '@playwright/test';
-import { bootServer, replay, toTest } from './helpers.js';
+import { existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import path from 'node:path';
+import { bootServer, replay, toTest, ROOT } from './helpers.js';
 import { isNavigable } from '../src/net/navigation.js';
 import type { Action } from '../src/model/actions.js';
 
 let ctx: Awaited<ReturnType<typeof bootServer>>;
 let base: string;
-test.beforeAll(async () => { ctx = await bootServer('security'); base = `http://localhost:${ctx.server.port}`; });
+test.beforeAll(async () => {
+  // The header checks need the built studio; on a fresh checkout this file can run before the UI tests build it.
+  if (!existsSync(path.join(ROOT, 'web/dist/index.html'))) execSync('npm run build', { cwd: ROOT, stdio: 'inherit' });
+  ctx = await bootServer('security'); base = `http://localhost:${ctx.server.port}`; });
 test.afterAll(async () => { await ctx.server.close(); });
 
 test('H2: a cross-origin state-changing request is refused, same-origin and tool clients still work', async ({ request }) => {

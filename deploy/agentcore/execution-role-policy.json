@@ -1,0 +1,54 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PullWorkerImage",
+      "Effect": "Allow",
+      "Action": ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
+      "Resource": "arn:aws:ecr:${REGION}:${ACCOUNT_ID}:repository/healwright-agentcore"
+    },
+    {
+      "Sid": "EcrToken",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "AgentCoreBrowserSessions",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agentcore:StartBrowserSession",
+        "bedrock-agentcore:GetBrowserSession",
+        "bedrock-agentcore:StopBrowserSession",
+        "bedrock-agentcore:ConnectBrowserAutomationStream",
+        "bedrock-agentcore:ConnectBrowserLiveViewStream"
+      ],
+      "Resource": [
+        "arn:aws:bedrock-agentcore:${REGION}:aws:browser/aws.browser.v1",
+        "arn:aws:bedrock-agentcore:${REGION}:${ACCOUNT_ID}:browser/*"
+      ]
+    },
+    {
+      "Sid": "ClaudeOnBedrock",
+      "Effect": "Allow",
+      "Action": ["bedrock-mantle:CreateInference"],
+      "Resource": "arn:aws:bedrock-mantle:${REGION}:${ACCOUNT_ID}:project/*",
+      "Condition": {
+        "StringLike": { "bedrock-mantle:Model": ["anthropic.claude-opus-5-5*", "anthropic.claude-opus-4-8*"] }
+      }
+    },
+    {
+      "Sid": "LogsAndMetering",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"],
+      "Resource": "arn:aws:logs:${REGION}:${ACCOUNT_ID}:log-group:/aws/bedrock-agentcore/runtimes/*"
+    },
+    {
+      "Sid": "Traces",
+      "Effect": "Allow",
+      "Action": ["xray:PutTraceSegments", "xray:PutTelemetryRecords", "cloudwatch:PutMetricData"],
+      "Resource": "*",
+      "Condition": { "StringEquals": { "cloudwatch:namespace": "bedrock-agentcore" } }
+    }
+  ]
+}
